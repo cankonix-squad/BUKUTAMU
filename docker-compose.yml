@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bukutamu
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-bukutamu}
+      POSTGRES_DB: bukutamu
+      TZ: Asia/Jakarta
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bukutamu"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://bukutamu:${DB_PASSWORD:-bukutamu}@db:5432/bukutamu?sslmode=disable
+      CORS_ORIGIN: ""
+    volumes:
+      - foto:/data/foto
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8000:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  foto:
