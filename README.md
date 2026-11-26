@@ -144,3 +144,36 @@ memakai SDK dari vendor reader.
 - Notifikasi ke pegawai yang dituju (WhatsApp/email)
 - Laporan/rekap kunjungan dan ekspor Excel
 - Implementasi reader e-KTP resmi (`pcscReader`) setelah SAM tersedia
+
+## CI/CD produksi
+
+Push atau merge ke `main` otomatis menjalankan GitHub Actions **CI and Production**.
+Pull request hanya menjalankan pemeriksaan; deploy manual tersedia melalui **Run workflow** pada branch `main`.
+
+1. CI menjalankan `go test`, `go vet`, lint frontend, dan build frontend.
+2. Runner membangun dua Docker image dengan tag SHA commit, lalu mengirim release melalui SSH yang memverifikasi host key.
+3. VPS menyimpan release di `/root/cankonix-node/apps/bukutamu/releases/<SHA>`, membuat dump database sebelum update, lalu menjalankan Compose produksi.
+4. Deploy dianggap berhasil setelah container sehat dan HTTPS `/api/health` serta halaman utama merespons sukses.
+
+URL: https://bukutamu.cankonix.com. Workflow: `.github/workflows/production.yml`.
+Secrets GitHub: `PROD_SSH_KEY`, `PROD_KNOWN_HOSTS`. Key khusus dibatasi melalui forced SSH command dan forwarding dimatikan.
+Konfigurasi rahasia ada di VPS: `shared/.env` (mode 600); tidak dikirim dari repository.
+Akun awal: `admin`; password awal tersimpan sebagai `ADMIN_PASSWORD` di file tersebut.
+Dukcapil masih menggunakan **mock**, mengikuti konfigurasi awal aplikasi; integrasi resmi harus dikonfigurasi terpisah.
+
+Database dan foto memakai volume tetap `bukutamu_pgdata` dan `bukutamu_foto`.
+Jangan menjalankan `docker compose down -v`. Cadangkan `shared/.env`, database, dan volume foto ke lokasi terpisah.
+Dump sebelum deploy ada di `backups/`; belum ada rotasi atau salinan offsite otomatis, sehingga penggunaan disk perlu dipantau.
+
+Jika update gagal, script mencoba mengembalikan image aplikasi sebelumnya. Database tidak di-rollback otomatis;
+migrasi wajib kompatibel dengan versi aplikasi sebelumnya. Pemulihan dump memerlukan tindakan operator.
+Untuk rollback manual ke release tersimpan (termasuk compose-nya):
+
+```bash
+cd /root/cankonix-node/apps/bukutamu
+SHA=<sha-release-sebelumnya>
+RELEASE_SHA="$SHA" docker compose --env-file shared/.env -f "releases/$SHA/docker-compose.prod.yml" up -d --wait
+printf '%s\n' "$SHA" > current-sha
+```
+
+Deploy diserialkan oleh concurrency GitHub dan `flock` di VPS. Pergantian container dapat menyebabkan jeda singkat.

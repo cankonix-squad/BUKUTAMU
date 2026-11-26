@@ -1,0 +1,65 @@
+name: bukutamu
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bukutamu
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?required}
+      POSTGRES_DB: bukutamu
+      TZ: Asia/Jakarta
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U bukutamu -d bukutamu']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+  backend:
+    image: bukutamu-backend:${RELEASE_SHA:?required}
+    restart: unless-stopped
+    env_file: /root/cankonix-node/apps/bukutamu/shared/.env
+    environment:
+      DATABASE_URL: postgres://bukutamu:${DB_PASSWORD:?required}@db:5432/bukutamu?sslmode=disable
+      STORAGE_DIR: /data/foto
+      CORS_ORIGIN: https://bukutamu.cankonix.com
+    volumes:
+      - foto:/data/foto
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/api/health']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+  frontend:
+    image: bukutamu-frontend:${RELEASE_SHA:?required}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1/api/health']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    labels:
+      traefik.enable: 'true'
+      traefik.docker.network: cankonix-proxy
+      traefik.http.routers.bukutamu.rule: Host(`bukutamu.cankonix.com`)
+      traefik.http.routers.bukutamu.entrypoints: websecure
+      traefik.http.routers.bukutamu.tls: 'true'
+      traefik.http.routers.bukutamu.tls.certresolver: letsencrypt
+      traefik.http.services.bukutamu.loadbalancer.server.port: '80'
+    networks: [internal, proxy]
+volumes:
+  pgdata:
+  foto:
+networks:
+  internal:
+  proxy:
+    external: true
+    name: cankonix-proxy
